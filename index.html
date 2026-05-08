@@ -308,6 +308,13 @@
             box-shadow: 0 0 30px #39ff14, 0 0 60px #39ff14;
         }
 
+        /* Muted state specifically for the UI audio button */
+        button.action-btn.muted {
+            background: #555 !important;
+            box-shadow: 0 0 10px #555 !important;
+            color: #aaa !important;
+        }
+
         .btn-group {
             display: flex;
             gap: 10px;
@@ -536,10 +543,47 @@
     <div id="controls-hint">Desktop: Assigned Keys | Mobile: Swipe</div>
 
     <script>
-        // --- AUDIO SYNTHESIS SYSTEM (DISABLED FOR PROTOTYPE) ---
+        // --- BULLETPROOF AUDIO SYSTEM ---
         const Synth = {
-            ctx: { state: 'running', resume: () => {} },
-            init() {}, playOsc() {}, playNoise() {}, turn() {}, bonk() {}, thud() {}, zip() {}, glitch() {}, muffle() {}, startMusic() {}
+            ctx: { state: 'running', resume: () => {} }, // Keep dummy for legacy UI code
+            isMuted: false,
+            bgMusic: new Audio('./assets/audio/music.ogg'),
+            init() {
+                this.bgMusic.loop = true;
+                this.bgMusic.volume = 0.4;
+                // Silently catch missing music files so the game doesn't crash on load
+                this.bgMusic.onerror = () => { console.log('Music file missing or failed to load. Running silently.'); };
+            },
+            playSound(filename) {
+                if (this.isMuted) return;
+                const audio = new Audio('./assets/audio/' + filename);
+                audio.volume = 0.6;
+                audio.onerror = () => {}; // Silently catch missing SFX files
+                audio.play().catch(() => {}); // Catch missing file promise rejections
+            },
+            turn(isPlayer) { if (isPlayer) this.playSound('turn.ogg'); },
+            bonk(isPlayer) { if (isPlayer) this.playSound('bonk.ogg'); },
+            thud() { this.playSound('thud.ogg'); },
+            zip() { this.playSound('zip.ogg'); },
+            glitch() { this.playSound('glitch.ogg'); },
+            win() { this.playSound('win.ogg'); },
+            startMusic() {
+                if (!this.isMuted) {
+                    this.bgMusic.play().catch(() => {});
+                }
+            },
+            muffle(isMuffled) {
+                this.bgMusic.volume = isMuffled ? 0.15 : 0.4;
+            },
+            toggleMute() {
+                this.isMuted = !this.isMuted;
+                if (this.isMuted) {
+                    this.bgMusic.pause();
+                } else {
+                    this.bgMusic.play().catch(() => {});
+                }
+                return this.isMuted;
+            }
         };
         // --- END AUDIO SYSTEM ---
 
@@ -559,6 +603,7 @@
         const inGameRestartBtn = document.getElementById('in-game-restart-btn');
         const inGameMuteBtn = document.getElementById('in-game-mute-btn');
         const gridSizeInput = document.getElementById('grid-size-input');
+        const totalEntitiesInput = document.getElementById('total-entities-input');
         
         const quickStartBtn = document.getElementById('quick-start-btn');
         const customSettingsBtn = document.getElementById('custom-settings-btn');
@@ -606,6 +651,7 @@
         let roundCountdown = 0;
         let currentWinner = null;
         let roundTimes = []; // Tracks the completion time of each round in the current match
+        let totalEntitiesSetting = 20; // Default total entities
         
         let bestTime = parseFloat(localStorage.getItem('neonBugBestTime')) || null;
         let worstTime = parseFloat(localStorage.getItem('neonBugWorstTime')) || null;
@@ -1039,7 +1085,7 @@
                         this.explorerLastY = null;
                     }
                 } else {
-                    this.moveCooldown = 80;
+                    this.moveCooldown = 70; 
                 }
 
                 this.lastMoveTime = 0;
@@ -1047,6 +1093,7 @@
                 this.lastDy = 0;
 
                 this.heldDirections = [];
+                this.turnIntent = null;
                 this.swipeIntent = null;
 
                 this.state = 'normal'; 
@@ -1154,25 +1201,53 @@
                 if (this.isPlayer && this.state === 'normal') {
                     if (now - this.lastMoveTime >= this.moveCooldown) {
                         let moved = false;
-                        for (let i = this.heldDirections.length - 1; i >= 0; i--) {
-                            const dir = this.heldDirections[i];
+                        
+                        // 1. Check Input Intent Buffer (if player pressed turn slightly before intersection)
+                        if (this.turnIntent && now - this.turnIntent.time < 300) {
                             let dx = 0, dy = 0;
-                            if (dir === 'up') dy = -1;
-                            else if (dir === 'right') dx = 1;
-                            else if (dir === 'down') dy = 1;
-                            else if (dir === 'left') dx = -1;
+                            if (this.turnIntent.dir === 'up') dy = -1;
+                            else if (this.turnIntent.dir === 'right') dx = 1;
+                            else if (this.turnIntent.dir === 'down') dy = 1;
+                            else if (this.turnIntent.dir === 'left') dx = -1;
 
                             if (this.canMove(dx, dy)) {
                                 this.executeMove(dx, dy);
                                 moved = true;
                                 
-                                // Deprioritize the successfully executed direction by moving it to the start of the array
-                                this.heldDirections.splice(i, 1);
-                                this.heldDirections.unshift(dir);
-                                break; 
+                                // Sync buffer with held directions to preserve alternating behavior
+                                const idx = this.heldDirections.indexOf(this.turnIntent.dir);
+                                if (idx > -1) {
+                                    this.heldDirections.splice(idx, 1);
+                                    this.heldDirections.unshift(this.turnIntent.dir);
+                                }
+                                
+                                this.turnIntent = null; // consume intent
                             }
                         }
 
+                        // 2. Check currently held directions (incorporates original fast-turn / zigzag logic)
+                        if (!moved) {
+                            for (let i = this.heldDirections.length - 1; i >= 0; i--) {
+                                const dir = this.heldDirections[i];
+                                let dx = 0, dy = 0;
+                                if (dir === 'up') dy = -1;
+                                else if (dir === 'right') dx = 1;
+                                else if (dir === 'down') dy = 1;
+                                else if (dir === 'left') dx = -1;
+
+                                if (this.canMove(dx, dy)) {
+                                    this.executeMove(dx, dy);
+                                    moved = true;
+                                    
+                                    // Deprioritize the successfully executed direction by moving it to the start of the array
+                                    this.heldDirections.splice(i, 1);
+                                    this.heldDirections.unshift(dir);
+                                    break; 
+                                }
+                            }
+                        }
+
+                        // 3. Mobile Swipe Intent
                         if (!moved && this.swipeIntent && now - this.swipeIntent.time < 400) {
                             if (this.canMove(this.swipeIntent.dx, this.swipeIntent.dy)) {
                                 this.executeMove(this.swipeIntent.dx, this.swipeIntent.dy);
@@ -1182,16 +1257,25 @@
                         }
 
                         if (!moved) {
-                            if (this.heldDirections.length > 0) {
+                            let bonkDx = 0, bonkDy = 0;
+                            if (this.turnIntent && now - this.turnIntent.time < 300) {
+                                if (this.turnIntent.dir === 'up') bonkDy = -1;
+                                else if (this.turnIntent.dir === 'right') bonkDx = 1;
+                                else if (this.turnIntent.dir === 'down') bonkDy = 1;
+                                else if (this.turnIntent.dir === 'left') bonkDx = -1;
+                            } else if (this.heldDirections.length > 0) {
                                 const dir = this.heldDirections[this.heldDirections.length - 1]; 
-                                let dx = 0, dy = 0;
-                                if (dir === 'up') dy = -1;
-                                else if (dir === 'right') dx = 1;
-                                else if (dir === 'down') dy = 1;
-                                else if (dir === 'left') dx = -1;
-                                this.triggerBonk(dx, dy);
+                                if (dir === 'up') bonkDy = -1;
+                                else if (dir === 'right') bonkDx = 1;
+                                else if (dir === 'down') bonkDy = 1;
+                                else if (dir === 'left') bonkDx = -1;
                             } else if (this.swipeIntent && now - this.swipeIntent.time < 400) {
-                                this.triggerBonk(this.swipeIntent.dx, this.swipeIntent.dy);
+                                bonkDx = this.swipeIntent.dx;
+                                bonkDy = this.swipeIntent.dy;
+                            }
+                            
+                            if (bonkDx !== 0 || bonkDy !== 0) {
+                                this.triggerBonk(bonkDx, bonkDy);
                             }
                         }
                     }
@@ -1632,6 +1716,11 @@
                 document.activeElement.blur();
             }
 
+            // Sync visual mute state
+            inGameMuteBtn.innerText = Synth.isMuted ? "Unmute" : "Mute";
+            if (Synth.isMuted) inGameMuteBtn.classList.add('muted');
+            else inGameMuteBtn.classList.remove('muted');
+
             postMatchLayer.classList.remove('winner-pulse');
 
             // Apply custom settings
@@ -1739,6 +1828,7 @@
 
             if (scores[winner.id] >= WINS_NEEDED) {
                 // Trigger full match over UI
+                Synth.win();
                 postMatchLayer.classList.remove('hidden');
                 Synth.muffle(true); 
                 gameState = 'MATCH_OVER';
@@ -2058,8 +2148,12 @@
                 else if (map.down.includes(e.key)) dir = 'down';
                 else if (map.left.includes(e.key)) dir = 'left';
 
-                if (dir && !bug.heldDirections.includes(dir)) {
-                    bug.heldDirections.push(dir);
+                if (dir) {
+                    if (!bug.heldDirections.includes(dir)) {
+                        bug.heldDirections.push(dir);
+                        // Buffer the intent so early presses turn seamlessly, ONLY on initial keydown to avoid OS repeat bugs
+                        bug.turnIntent = { dir: dir, time: performance.now() };
+                    }
                 }
             });
         });
@@ -2080,6 +2174,9 @@
                 if (dir) {
                     const index = bug.heldDirections.indexOf(dir);
                     if (index > -1) bug.heldDirections.splice(index, 1);
+                    if (bug.turnIntent && bug.turnIntent.dir === dir) {
+                        bug.turnIntent = null;
+                    }
                 }
             });
         });
@@ -2130,12 +2227,13 @@
             initRound(); 
         });
 
-        // In-game Mute Button (Placeholder functionality)
-        let isMuted = false;
+        // In-game Mute Button
         inGameMuteBtn.addEventListener('click', () => {
             if (document.activeElement) document.activeElement.blur(); // Drop focus
-            isMuted = !isMuted;
+            const isMuted = Synth.toggleMute();
             inGameMuteBtn.innerText = isMuted ? "Unmute" : "Mute";
+            if (isMuted) inGameMuteBtn.classList.add('muted');
+            else inGameMuteBtn.classList.remove('muted');
         });
 
         // Menu Navigation
@@ -2152,6 +2250,7 @@
         // Start actions
         quickStartBtn.addEventListener('click', () => {
             Synth.init(); 
+            Synth.startMusic();
             if (Synth.ctx.state === 'suspended') Synth.ctx.resume();
             initMatch(); 
             if (animationId) cancelAnimationFrame(animationId);
@@ -2161,6 +2260,7 @@
         joinFriendBtn.addEventListener('click', () => {
             if (joinCodeInput.value.length < 3) return; // Simple check
             Synth.init(); 
+            Synth.startMusic();
             if (Synth.ctx.state === 'suspended') Synth.ctx.resume();
             initMatch(); // Prototype fallback to quick match
             if (animationId) cancelAnimationFrame(animationId);
@@ -2169,6 +2269,7 @@
 
         startBtn.addEventListener('click', () => {
             Synth.init(); 
+            Synth.startMusic();
             if (Synth.ctx.state === 'suspended') Synth.ctx.resume();
             initMatch(); 
             if (animationId) cancelAnimationFrame(animationId);
@@ -2190,9 +2291,8 @@
 
         window.onload = () => {
             buildLobby();
-            resizeCanvas();
             generateMaze();
-            draw(true); 
+            resizeCanvas();
         };
     </script>
 </body>
