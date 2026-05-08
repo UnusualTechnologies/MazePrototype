@@ -443,7 +443,7 @@
 </head>
 <body>
 
-    <div id="version-number">v1.0.2</div>
+    <div id="version-number">v1.0.3</div>
 
     <div id="main-wrapper">
         <div id="hud" class="hidden">
@@ -508,12 +508,20 @@
                         <input type="number" id="grid-size-input" value="20" min="5" max="100" style="font-size: 1.1rem; padding: 5px; width: 80px; text-align: center;">
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
-                        <label for="total-entities-input" style="font-size: 1.2rem;">Total Entities:</label>
-                        <input type="number" id="total-entities-input" value="20" min="2" max="100" style="font-size: 1.1rem; padding: 5px; width: 80px; text-align: center;">
+                        <label for="pu-opp-input" style="font-size: 1.2rem;">Orbs (Teleport Others):</label>
+                        <input type="number" id="pu-opp-input" value="10" min="0" max="100" style="font-size: 1.1rem; padding: 5px; width: 80px; text-align: center;">
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
-                        <input type="checkbox" id="powerups-toggle" checked style="width: 20px; height: 20px; cursor: pointer;"> 
-                        <label for="powerups-toggle" style="font-size: 1.2rem; cursor: pointer; user-select: none;">Enable Power Ups</label>
+                        <label for="pu-self-input" style="font-size: 1.2rem;">Holes (Teleport Self):</label>
+                        <input type="number" id="pu-self-input" value="10" min="0" max="100" style="font-size: 1.1rem; padding: 5px; width: 80px; text-align: center;">
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <label for="pu-rocket-input" style="font-size: 1.2rem;">Homing Rockets:</label>
+                        <input type="number" id="pu-rocket-input" value="0" min="0" max="100" style="font-size: 1.1rem; padding: 5px; width: 80px; text-align: center;">
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <input type="checkbox" id="collisions-toggle" checked style="width: 20px; height: 20px; cursor: pointer;"> 
+                        <label for="collisions-toggle" style="font-size: 1.2rem; cursor: pointer; user-select: none;">Enable Collisions</label>
                     </div>
                 </div>
 
@@ -550,9 +558,7 @@
         const inGameMenuBtn = document.getElementById('in-game-menu-btn');
         const inGameRestartBtn = document.getElementById('in-game-restart-btn');
         const inGameMuteBtn = document.getElementById('in-game-mute-btn');
-        const powerupsToggle = document.getElementById('powerups-toggle');
         const gridSizeInput = document.getElementById('grid-size-input');
-        const totalEntitiesInput = document.getElementById('total-entities-input');
         
         const quickStartBtn = document.getElementById('quick-start-btn');
         const customSettingsBtn = document.getElementById('custom-settings-btn');
@@ -585,6 +591,12 @@
         let lastTime = 0;
         let screenShake = 0;
 
+        // Custom settings state
+        let settingPuOpp = 10;
+        let settingPuSelf = 10;
+        let settingPuRocket = 0;
+        let settingCollisions = true;
+
         // Game Loop & Match Structure Variables
         const WINS_NEEDED = 3;
         let activePlayersData = []; 
@@ -594,7 +606,6 @@
         let roundCountdown = 0;
         let currentWinner = null;
         let roundTimes = []; // Tracks the completion time of each round in the current match
-        let totalEntitiesSetting = 20; // Default total entities
         
         let bestTime = parseFloat(localStorage.getItem('neonBugBestTime')) || null;
         let worstTime = parseFloat(localStorage.getItem('neonBugWorstTime')) || null;
@@ -1116,7 +1127,21 @@
                     }
                 }
 
-                // Players now pass entirely through each other with no collision block!
+                if (settingCollisions) {
+                    for (let i = 0; i < bugs.length; i++) {
+                        const otherBug = bugs[i];
+                        if (otherBug !== this && otherBug.state === 'normal' && otherBug.gridX === this.gridX && otherBug.gridY === this.gridY) {
+                            Synth.thud();
+                            this.flashTimer = 1.0;
+                            otherBug.flashTimer = 1.0;
+                            shockwaves.push(new Shockwave(this.pixelX, this.pixelY, '#ffffff'));
+                            screenShake = 15;
+                            startTeleport(this);
+                            startTeleport(otherBug);
+                            break; 
+                        }
+                    }
+                }
 
                 if (this.gridX === goal.x && this.gridY === goal.y) {
                     endGame(this);
@@ -1521,42 +1546,34 @@
 
         function spawnPowerUps() {
             powerUps = [];
-            
-            // Check UI toggle state
-            if (!powerupsToggle.checked) return;
-
-            const numPlayers = activePlayersData.length || 1;
-            
-            // Total players + powerups = totalEntitiesSetting. Math.max ensures we don't go negative.
-            const totalPowerUps = Math.max(0, totalEntitiesSetting - numPlayers);
-            const totalOpp = Math.floor(totalPowerUps / 2);
-            const selfCount = totalPowerUps - totalOpp; // Remaining half
-            
-            const rocketCount = Math.floor(totalOpp / 2);
-            const oppCount = totalOpp - rocketCount;
 
             function getRandomEmptyPos() {
                 let rx, ry;
-                while(true) {
+                let attempts = 0;
+                while(attempts < 1000) {
                     rx = Math.floor(Math.random() * cols); 
                     ry = Math.floor(Math.random() * rows);
-                    if ((rx === goal.x && ry === goal.y) || (rx === 0 && ry === 0) || (rx === cols - 1 && ry === 0) || (rx === 0 && ry === rows - 1) || (rx === cols - 1 && ry === rows - 1)) continue;
+                    if ((rx === goal.x && ry === goal.y) || (rx === 0 && ry === 0) || (rx === cols - 1 && ry === 0) || (rx === 0 && ry === rows - 1) || (rx === cols - 1 && ry === rows - 1)) {
+                        attempts++;
+                        continue;
+                    }
                     if (!powerUps.some(p => p.x === rx && p.y === ry)) break;
+                    attempts++;
                 }
                 return {x: rx, y: ry};
             }
 
-            for(let i=0; i<oppCount; i++) {
+            for(let i=0; i<settingPuOpp; i++) {
                 let pos = getRandomEmptyPos();
                 powerUps.push({x: pos.x, y: pos.y, type: 'opponents'});
             }
-            for(let i=0; i<rocketCount; i++) {
-                let pos = getRandomEmptyPos();
-                powerUps.push({x: pos.x, y: pos.y, type: 'rocket'});
-            }
-            for(let i=0; i<selfCount; i++) {
+            for(let i=0; i<settingPuSelf; i++) {
                 let pos = getRandomEmptyPos();
                 powerUps.push({x: pos.x, y: pos.y, type: 'self'});
+            }
+            for(let i=0; i<settingPuRocket; i++) {
+                let pos = getRandomEmptyPos();
+                powerUps.push({x: pos.x, y: pos.y, type: 'rocket'});
             }
         }
 
@@ -1567,6 +1584,7 @@
             let rx = goal.x, ry = goal.y;
             
             let isValidDestination = false;
+            let attempts = 0;
             while (!isValidDestination) { 
                 rx = Math.floor(Math.random() * cols); 
                 ry = Math.floor(Math.random() * rows); 
@@ -1577,6 +1595,13 @@
                 
                 // Cannot teleport onto a power-up
                 if (powerUps.some(p => p.x === rx && p.y === ry)) isValidDestination = false;
+
+                // Ensure teleporting player is not placed within 10 cells of the goal
+                if (distanceMap.length > 0 && distanceMap[rx] && distanceMap[rx][ry] !== undefined) {
+                    if (attempts < 200 && distanceMap[rx][ry] <= 10) isValidDestination = false;
+                }
+                
+                attempts++;
             }
             
             b.targetGridX = rx; b.targetGridY = ry;
@@ -1617,10 +1642,19 @@
             rows = customSize;
             goal = { x: Math.floor(cols / 2), y: Math.floor(rows / 2) };
 
-            let customEntities = parseInt(document.getElementById('total-entities-input').value, 10);
-            if (isNaN(customEntities) || customEntities < 2) customEntities = 2; // At least 2 entities needed
-            if (customEntities > 100) customEntities = 100; // Cap to prevent lag
-            totalEntitiesSetting = customEntities;
+            let customPuOpp = parseInt(document.getElementById('pu-opp-input').value, 10);
+            if (isNaN(customPuOpp) || customPuOpp < 0) customPuOpp = 10;
+            settingPuOpp = customPuOpp;
+
+            let customPuSelf = parseInt(document.getElementById('pu-self-input').value, 10);
+            if (isNaN(customPuSelf) || customPuSelf < 0) customPuSelf = 10;
+            settingPuSelf = customPuSelf;
+
+            let customPuRocket = parseInt(document.getElementById('pu-rocket-input').value, 10);
+            if (isNaN(customPuRocket) || customPuRocket < 0) customPuRocket = 0;
+            settingPuRocket = customPuRocket;
+
+            settingCollisions = document.getElementById('collisions-toggle').checked;
 
             parseLobby();
             if (activePlayersData.length === 0) return; // Need at least 1 player
@@ -1746,6 +1780,33 @@
         function drawMaze() {
             ctx.fillStyle = colors.bg;
             ctx.fillRect(0, 0, width, height);
+
+            // --- TENSION BUILDER: Pulse background if someone is close to winning ---
+            let closestBug = null;
+            let minDist = Infinity;
+            if (gameState === 'PLAYING') {
+                bugs.forEach(bug => {
+                    if (bug.state === 'normal') {
+                        let d = distanceMap[bug.gridX][bug.gridY];
+                        if (d < minDist) {
+                            minDist = d;
+                            closestBug = bug;
+                        }
+                    }
+                });
+
+                if (minDist <= 4 && closestBug) {
+                    const time = performance.now();
+                    const pulseSpeed = 50 + (minDist * 20); 
+                    const pulseAlpha = ((Math.sin(time / pulseSpeed) + 1) / 2) * 0.3; // Flashes between 0 and 0.3 opacity
+                    
+                    ctx.save();
+                    ctx.fillStyle = closestBug.color;
+                    ctx.globalAlpha = pulseAlpha;
+                    ctx.fillRect(0, 0, width, height);
+                    ctx.restore();
+                }
+            }
 
             ctx.strokeStyle = colors.wall;
             ctx.lineWidth = 4;
