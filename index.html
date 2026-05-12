@@ -1032,11 +1032,11 @@
                 this.lastPixelY = 0;
                 
                 this.id = data.id;
-                this.sessionId = data.sessionId;
+                this.sessionId = data.sessionId || null;
                 this.color = data.color;
                 this.isPlayer = data.isPlayer;
-                this.isLocal = data.isLocal;
-                this.controlScheme = data.controlScheme;
+                this.isLocal = !!data.isLocal;
+                this.controlScheme = data.controlScheme || 'WASD';
                 
                 this.trail = [];
                 this.maxTrail = 25;
@@ -1139,6 +1139,7 @@
             canMove(dx, dy) {
                 if (this.gridX + dx < 0 || this.gridX + dx >= cols || this.gridY + dy < 0 || this.gridY + dy >= rows) return false;
                 const cell = grid[this.gridX][this.gridY];
+                if (!cell || !cell.walls) return false;
                 if (dy === -1 && !cell.walls[0]) return true; 
                 if (dx === 1 && !cell.walls[1]) return true;  
                 if (dy === 1 && !cell.walls[2]) return true;  
@@ -1166,8 +1167,9 @@
                 this.gridY += dy;
                 this.lastMoveTime = performance.now();
                 
-                // Send move to server if this is the local player and we are in a room
-                if (this.isLocal && typeof room !== 'undefined' && room) {
+                // Authoritative local check for sending moves to server
+                const isActuallyLocal = (room && room.sessionId) ? (this.sessionId === room.sessionId) : this.isLocal;
+                if (isActuallyLocal && room) {
                     room.send("move", { x: this.gridX, y: this.gridY });
                 }
             }
@@ -1175,8 +1177,12 @@
             update(dt) {
                 const now = performance.now();
 
-                if (this.isPlayer && this.state === 'normal') {
+                // Authoritative local check for movement prediction
+                const isActuallyLocal = (room && room.sessionId) ? (this.sessionId === room.sessionId) : this.isLocal;
+
+                if (this.isPlayer && this.state === 'normal' && isActuallyLocal) {
                     if (now - this.lastMoveTime >= this.moveCooldown) {
+                        console.log(`[Update] ${this.id} (${this.sessionId}) moving locally. Room Local: ${room?.sessionId}`);
                         let moved = false;
                         
                         // 1. Check Input Intent Buffer (if player pressed turn slightly before intersection)
@@ -1713,6 +1719,15 @@
             hud.classList.remove('hidden');
             
             updateScoreboard();
+
+            // If we're starting a networked game, ensure a clean slate.
+            // All players will be added via onStateChange using server-authoritative sessionIds.
+            if (room && room.sessionId) {
+                console.log("Networked match starting. Clearing all local bug artifacts.");
+                bugs = []; 
+                activePlayersData.forEach(p => p.isLocal = false);
+            }
+
             initRound();
         }
 
@@ -1723,19 +1738,22 @@
                 generateMaze();
             }
 
-            bugs = [];
-            powerUps = [];
-            shockwaves = [];
-            particles = []; // Clear particles on round start
-            rockets = []; // Clear active rockets
+            // In networked play, preserve existing bugs to maintain session continuity
+            if (typeof room === 'undefined' || !room) {
+                bugs = [];
+                spawnPowerUps();
+                bugs = activePlayersData.map(data => new Bug(data));
+            } else {
+                // Networked game: just clear particles and non-player visual effects
+                shockwaves = [];
+                particles = [];
+                rockets = [];
+            }
+            
+            powerUps = []; // Will be repopulated by server state
             screenShake = 0;
             
             resizeCanvas(); // Safe to resize and draw now that the new maze grid is generated!
-            
-            if (typeof room === 'undefined' || !room) {
-                spawnPowerUps();
-                bugs = activePlayersData.map(data => new Bug(data));
-            }
             
             gameState = 'PLAYING';
             postMatchLayer.classList.add('hidden');
@@ -2100,6 +2118,14 @@
             if (gameState !== 'PLAYING') return;
             bugs.forEach(bug => {
                 if (!bug.isPlayer) return;
+                
+                // Authoritative local check for input processing
+                const isActuallyLocal = (room && room.sessionId) ? (bug.sessionId === room.sessionId) : bug.isLocal;
+                if (!isActuallyLocal) {
+                    // console.log(`[Input] Ignoring input for ${bug.id} (${bug.sessionId}). Local is: ${room?.sessionId}`);
+                    return;
+                }
+
                 const map = controlsMap[bug.controlScheme];
                 if (!map) return;
 
@@ -2123,6 +2149,14 @@
             if (gameState !== 'PLAYING') return;
             bugs.forEach(bug => {
                 if (!bug.isPlayer) return;
+                
+                // Authoritative local check for input processing
+                const isActuallyLocal = (room && room.sessionId) ? (bug.sessionId === room.sessionId) : bug.isLocal;
+                if (!isActuallyLocal) {
+                    // console.log(`[Input] Ignoring input for ${bug.id} (${bug.sessionId}). Local is: ${room?.sessionId}`);
+                    return;
+                }
+
                 const map = controlsMap[bug.controlScheme];
                 if (!map) return;
 
@@ -2157,7 +2191,10 @@
             }
 
             if (gameState !== 'PLAYING') return;
-            const p1 = bugs.find(b => b.isPlayer);
+            const p1 = bugs.find(b => {
+                const isActuallyLocal = (room && room.sessionId) ? (b.sessionId === room.sessionId) : b.isLocal;
+                return b.isPlayer && isActuallyLocal;
+            });
             if (!p1) return;
             
             let dx = e.changedTouches[0].screenX - touchStartX;
@@ -2218,9 +2255,21 @@
             if (Synth.ctx.state === 'suspended') Synth.ctx.resume();
 
             console.log("Searching for game...");
+            bugs = []; // Explicitly clear any local bugs before joining networked game
             try {
                 room = await client.joinOrCreate("game");
-                console.log("Joined room:", room.roomId);
+                
+                // Wait a tiny bit to ensure sessionId is ready
+                if (!room.sessionId) {
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                }
+
+                console.log("Joined room:", room.roomId, "SessionID:", room.sessionId);
+
+                // Now that we have a room and a sessionId, we can safely init the match
+                initMatch();
+                if (animationId) cancelAnimationFrame(animationId);
+                draw(true);
 
                 // Listen for server state changes
                 room.onStateChange((state) => {
@@ -2263,6 +2312,7 @@
                     // Sync Players
                     state.players.forEach((playerState, sessionId) => {
                         let bug = bugs.find(b => b.sessionId === sessionId);
+                        const isLocal = sessionId === room.sessionId;
                         if (!bug) {
                             // Create new bug for joined player
                             bug = new Bug({
@@ -2272,11 +2322,14 @@
                                 x: playerState.x,
                                 y: playerState.y,
                                 isPlayer: true,
-                                isLocal: sessionId === room.sessionId,
+                                isLocal: isLocal,
                                 controlScheme: 'WASD' // Default
                             });
                             bugs.push(bug);
                         } else {
+                            // Ensure isLocal status is always correct
+                            bug.isLocal = isLocal;
+
                             // If player position changed drastically, trigger teleport animation
                             if (Math.abs(bug.gridX - playerState.x) > 1 || Math.abs(bug.gridY - playerState.y) > 1) {
                                 if (bug.state === 'normal') {
@@ -2297,16 +2350,17 @@
                         }
                     });
 
-                    // Remove players who left
-                    bugs = bugs.filter(b => state.players.has(b.sessionId) || !b.sessionId);
+                    // Remove players who left. 
+                    // In networked games, we ONLY keep bugs that have an active server sessionId match.
+                    bugs = bugs.filter(b => state.players.has(b.sessionId));
                 });
             } catch (e) {
                 console.error("Could not join/create room", e);
+                // Fallback to local if join fails
+                initMatch();
+                if (animationId) cancelAnimationFrame(animationId);
+                draw(true);
             }
-
-            initMatch();
-            if (animationId) cancelAnimationFrame(animationId);
-            draw(true);
         });
         joinFriendBtn.addEventListener('click', () => {
             if (joinCodeInput.value.length < 3) return; // Simple check
