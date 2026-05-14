@@ -451,7 +451,7 @@
 </head>
 <body>
 
-    <div id="version-number">v1.1.15</div>
+    <div id="version-number">v1.1.16</div>
 
     <div id="main-wrapper">
         <div id="hud" class="hidden">
@@ -646,37 +646,20 @@
         let lastTime = 0;
         let screenShake = 0;
 
-        // Custom settings state
-        let settingPuOpp = 10;
-        let settingPuSelf = 10;
-        let settingPuRocket = 0;
-        let settingCollisions = true;
-
         // Game Loop & Match Structure Variables
         const WINS_NEEDED = 3;
-        let activePlayersData = []; 
+        let activePlayersData = [];
         let scores = {};
-        let matchTime = 0;       
-        let roundStartTime = 0;  
+        let matchTime = 0;
+        let roundStartTime = 0;
         let roundCountdown = 0;
         let currentWinner = null;
-        let roundTimes = []; // Tracks the completion time of each round in the current match
-        let totalEntitiesSetting = 20; // Default total entities
-        
+        let roundTimes = [];
+
         let bestTime = parseFloat(localStorage.getItem('neonBugBestTime')) || null;
         let worstTime = parseFloat(localStorage.getItem('neonBugWorstTime')) || null;
 
         let goal = { x: Math.floor(cols / 2), y: Math.floor(rows / 2) };
-
-        function generateFriendCode() {
-            // Clean alphabet: removed I, L, 1, O, 0 to avoid ambiguity
-            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-            let code = '';
-            for (let i = 0; i < 9; i++) {
-                code += chars.charAt(Math.floor(Math.random() * chars.length));
-            }
-            return code;
-        }
 
         const colors = {
             powerupOpponents: '#ffff00',
@@ -685,12 +668,7 @@
             bg: '#000000'     
         };
 
-        // Shared baseline speeds for AI behavior
-        const AI_SPEEDS = {
-            easy: 1000,
-            intermediate: 600,
-            hard: 300
-        };
+
 
         // 8 highly distinct player colors spanning the spectrum
         const playerColors = [
@@ -1045,60 +1023,7 @@
                 this.trail = [];
                 this.maxTrail = 25;
                 this.moveTimer = 0;
-                
-                // Parse AI settings
-                if (!this.isPlayer) {
-                    let sType = data.aiSpeed;
-                    if (sType === 'random') {
-                        const speeds = ['scaling', 'easy', 'intermediate', 'hard'];
-                        sType = speeds[Math.floor(Math.random() * speeds.length)];
-                    }
-                    this.aiSpeedType = sType;
-                    
-                    let bType = data.aiBehavior;
-                    if (bType === 'random') {
-                        const behaviors = ['explorer', 'guesser', 'focused'];
-                        bType = behaviors[Math.floor(Math.random() * behaviors.length)];
-                    }
-                    this.aiBehavior = bType;
-
-                    let aiCooldown = AI_SPEEDS.intermediate;
-                    if (this.aiSpeedType === 'easy') aiCooldown = AI_SPEEDS.easy;
-                    else if (this.aiSpeedType === 'intermediate') aiCooldown = AI_SPEEDS.intermediate;
-                    else if (this.aiSpeedType === 'hard') aiCooldown = AI_SPEEDS.hard;
-                    else if (this.aiSpeedType === 'custom') aiCooldown = data.aiCustomSpeed;
-                    else if (this.aiSpeedType === 'scaling') {
-                        let highestHumanScore = -1;
-                        activePlayersData.forEach(p => {
-                            if (p.isPlayer) {
-                                const s = scores[p.id] || 0;
-                                if (s > highestHumanScore) highestHumanScore = s;
-                            }
-                        });
-                        
-                        if (highestHumanScore === 0) aiCooldown = AI_SPEEDS.easy;
-                        else if (highestHumanScore === 1) aiCooldown = AI_SPEEDS.intermediate;
-                        else if (highestHumanScore >= 2) aiCooldown = AI_SPEEDS.hard;
-                        else aiCooldown = AI_SPEEDS.easy; // fallback if no humans
-                    }
-                    this.moveCooldown = aiCooldown;
-
-                    if (this.aiBehavior === 'guesser') {
-                        // Pick a random destination that isn't the main goal
-                        let rx = goal.x, ry = goal.y;
-                        while (rx === goal.x && ry === goal.y) {
-                            rx = Math.floor(Math.random() * cols);
-                            ry = Math.floor(Math.random() * rows);
-                        }
-                        this.guesserTarget = { x: rx, y: ry };
-                        this.guesserDistanceMap = generateCustomDistanceMap(this.guesserTarget);
-                    } else if (this.aiBehavior === 'explorer') {
-                        this.explorerLastX = null;
-                        this.explorerLastY = null;
-                    }
-                } else {
-                    this.moveCooldown = 70; 
-                }
+                this.moveCooldown = 70;
 
                 this.lastMoveTime = 0;
                 this.lastDx = 0;
@@ -1298,104 +1223,6 @@
 
                 this.trail.push({ x: this.pixelX, y: this.pixelY });
                 if (this.trail.length > this.maxTrail) this.trail.shift();
-
-                if (!this.isPlayer && gameState === 'PLAYING' && this.state === 'normal') {
-                    this.moveTimer += dt;
-                    if (this.moveTimer >= this.moveCooldown) {
-                        this.moveTimer = 0;
-                        this.aiTakeStep();
-                    }
-                }
-            }
-
-            aiTakeStep() {
-                if (this.aiBehavior === 'explorer') {
-                    // Check if we are closest to the goal
-                    const myDist = distanceMap[this.gridX][this.gridY];
-                    let minOtherDist = Infinity;
-                    for (let i = 0; i < bugs.length; i++) {
-                        if (bugs[i] !== this && bugs[i].state === 'normal') {
-                            const otherDist = distanceMap[bugs[i].gridX][bugs[i].gridY];
-                            if (otherDist < minOtherDist) minOtherDist = otherDist;
-                        }
-                    }
-
-                    // If no one is in front of us, act Focused
-                    if (myDist <= minOtherDist) {
-                        let bestMove = null;
-                        let minNeighborDist = myDist;
-
-                        if (this.canMove(0, -1) && distanceMap[this.gridX][this.gridY-1] < minNeighborDist) { bestMove = {dx: 0, dy: -1}; minNeighborDist = distanceMap[this.gridX][this.gridY-1]; }
-                        if (this.canMove(1, 0) && distanceMap[this.gridX+1][this.gridY] < minNeighborDist) { bestMove = {dx: 1, dy: 0}; minNeighborDist = distanceMap[this.gridX+1][this.gridY]; }
-                        if (this.canMove(0, 1) && distanceMap[this.gridX][this.gridY+1] < minNeighborDist) { bestMove = {dx: 0, dy: 1}; minNeighborDist = distanceMap[this.gridX][this.gridY+1]; }
-                        if (this.canMove(-1, 0) && distanceMap[this.gridX-1][this.gridY] < minNeighborDist) { bestMove = {dx: -1, dy: 0}; minNeighborDist = distanceMap[this.gridX-1][this.gridY]; }
-
-                        if (bestMove) {
-                            this.explorerLastX = this.gridX; // Keep memory updated
-                            this.explorerLastY = this.gridY;
-                            this.executeMove(bestMove.dx, bestMove.dy);
-                            return;
-                        }
-                    }
-
-                    let possibleMoves = [];
-                    if (this.canMove(0, -1)) possibleMoves.push({dx: 0, dy: -1});
-                    if (this.canMove(1, 0)) possibleMoves.push({dx: 1, dy: 0});
-                    if (this.canMove(0, 1)) possibleMoves.push({dx: 0, dy: 1});
-                    if (this.canMove(-1, 0)) possibleMoves.push({dx: -1, dy: 0});
-                    
-                    // Filter out the reverse move to avoid getting stuck vibrating back and forth
-                    let forwardMoves = possibleMoves.filter(m => !(this.gridX + m.dx === this.explorerLastX && this.gridY + m.dy === this.explorerLastY));
-                    
-                    let chosenMove;
-                    if (forwardMoves.length > 0) {
-                        // Pick random unvisited pathway
-                        chosenMove = forwardMoves[Math.floor(Math.random() * forwardMoves.length)];
-                    } else if (possibleMoves.length > 0) {
-                        // Dead end reached, forced to backtrack
-                        chosenMove = possibleMoves[0]; 
-                    }
-                    
-                    if (chosenMove) {
-                        this.explorerLastX = this.gridX;
-                        this.explorerLastY = this.gridY;
-                        this.executeMove(chosenMove.dx, chosenMove.dy);
-                    }
-                    return;
-                }
-
-                if (this.aiBehavior === 'guesser') {
-                    if (this.gridX === this.guesserTarget.x && this.gridY === this.guesserTarget.y) {
-                        // We hit the guess location, convert to focused to hunt down the goal!
-                        this.aiBehavior = 'focused';
-                    } else {
-                        // Follow the custom guess map
-                        const currDist = this.guesserDistanceMap[this.gridX][this.gridY];
-                        let bestMove = null;
-                        let minNeighborDist = currDist;
-
-                        if (this.canMove(0, -1) && this.guesserDistanceMap[this.gridX][this.gridY-1] < minNeighborDist) { bestMove = {dx: 0, dy: -1}; minNeighborDist = this.guesserDistanceMap[this.gridX][this.gridY-1]; }
-                        if (this.canMove(1, 0) && this.guesserDistanceMap[this.gridX+1][this.gridY] < minNeighborDist) { bestMove = {dx: 1, dy: 0}; minNeighborDist = this.guesserDistanceMap[this.gridX+1][this.gridY]; }
-                        if (this.canMove(0, 1) && this.guesserDistanceMap[this.gridX][this.gridY+1] < minNeighborDist) { bestMove = {dx: 0, dy: 1}; minNeighborDist = this.guesserDistanceMap[this.gridX][this.gridY+1]; }
-                        if (this.canMove(-1, 0) && this.guesserDistanceMap[this.gridX-1][this.gridY] < minNeighborDist) { bestMove = {dx: -1, dy: 0}; minNeighborDist = this.guesserDistanceMap[this.gridX-1][this.gridY]; }
-
-                        if (bestMove) this.executeMove(bestMove.dx, bestMove.dy);
-                        return;
-                    }
-                }
-
-                if (this.aiBehavior === 'focused') {
-                    const currDist = distanceMap[this.gridX][this.gridY];
-                    let bestMove = null;
-                    let minDist = currDist;
-
-                    if (this.canMove(0, -1) && distanceMap[this.gridX][this.gridY-1] < minDist) { bestMove = {dx: 0, dy: -1}; minDist = distanceMap[this.gridX][this.gridY-1]; }
-                    if (this.canMove(1, 0) && distanceMap[this.gridX+1][this.gridY] < minDist) { bestMove = {dx: 1, dy: 0}; minDist = distanceMap[this.gridX+1][this.gridY]; }
-                    if (this.canMove(0, 1) && distanceMap[this.gridX][this.gridY+1] < minDist) { bestMove = {dx: 0, dy: 1}; minDist = distanceMap[this.gridX][this.gridY+1]; }
-                    if (this.canMove(-1, 0) && distanceMap[this.gridX-1][this.gridY] < minDist) { bestMove = {dx: -1, dy: 0}; minDist = distanceMap[this.gridX-1][this.gridY]; }
-
-                    if (bestMove) this.executeMove(bestMove.dx, bestMove.dy);
-                }
             }
 
             draw() {
@@ -1556,24 +1383,6 @@
             else if (y === -1) { a.walls[2] = false; b.walls[0] = false; }
         }
 
-        // Dedicated custom distance mapper for "Guesser" AI brains
-        function generateCustomDistanceMap(target) {
-            let customMap = Array(cols).fill().map(() => Array(rows).fill(Infinity));
-            customMap[target.x][target.y] = 0;
-            let queue = [{x: target.x, y: target.y}];
-
-            while(queue.length > 0) {
-                let curr = queue.shift();
-                let cell = grid[curr.x][curr.y];
-
-                if (!cell.walls[0] && customMap[curr.x][curr.y-1] === Infinity) { customMap[curr.x][curr.y-1] = customMap[curr.x][curr.y] + 1; queue.push({x: curr.x, y: curr.y-1}); }
-                if (!cell.walls[1] && customMap[curr.x+1][curr.y] === Infinity) { customMap[curr.x+1][curr.y] = customMap[curr.x][curr.y] + 1; queue.push({x: curr.x+1, y: curr.y}); }
-                if (!cell.walls[2] && customMap[curr.x][curr.y+1] === Infinity) { customMap[curr.x][curr.y+1] = customMap[curr.x][curr.y] + 1; queue.push({x: curr.x, y: curr.y+1}); }
-                if (!cell.walls[3] && customMap[curr.x-1][curr.y] === Infinity) { customMap[curr.x-1][curr.y] = customMap[curr.x][curr.y] + 1; queue.push({x: curr.x-1, y: curr.y}); }
-            }
-            return customMap;
-        }
-
         function generateDistanceMap() {
             distanceMap = Array(cols).fill().map(() => Array(rows).fill(Infinity));
             distanceMap[goal.x][goal.y] = 0;
@@ -1587,39 +1396,6 @@
                 if (!cell.walls[1] && distanceMap[curr.x+1][curr.y] === Infinity) { distanceMap[curr.x+1][curr.y] = distanceMap[curr.x][curr.y] + 1; queue.push({x: curr.x+1, y: curr.y}); }
                 if (!cell.walls[2] && distanceMap[curr.x][curr.y+1] === Infinity) { distanceMap[curr.x][curr.y+1] = distanceMap[curr.x][curr.y] + 1; queue.push({x: curr.x, y: curr.y+1}); }
                 if (!cell.walls[3] && distanceMap[curr.x-1][curr.y] === Infinity) { distanceMap[curr.x-1][curr.y] = distanceMap[curr.x][curr.y] + 1; queue.push({x: curr.x-1, y: curr.y}); }
-            }
-        }
-
-        function spawnPowerUps() {
-            powerUps = [];
-
-            function getRandomEmptyPos() {
-                let rx, ry;
-                let attempts = 0;
-                while(attempts < 1000) {
-                    rx = Math.floor(Math.random() * cols); 
-                    ry = Math.floor(Math.random() * rows);
-                    if ((rx === goal.x && ry === goal.y) || (rx === 0 && ry === 0) || (rx === cols - 1 && ry === 0) || (rx === 0 && ry === rows - 1) || (rx === cols - 1 && ry === rows - 1)) {
-                        attempts++;
-                        continue;
-                    }
-                    if (!powerUps.some(p => p.x === rx && p.y === ry)) break;
-                    attempts++;
-                }
-                return {x: rx, y: ry};
-            }
-
-            for(let i=0; i<settingPuOpp; i++) {
-                let pos = getRandomEmptyPos();
-                powerUps.push({x: pos.x, y: pos.y, type: 'opponents'});
-            }
-            for(let i=0; i<settingPuSelf; i++) {
-                let pos = getRandomEmptyPos();
-                powerUps.push({x: pos.x, y: pos.y, type: 'self'});
-            }
-            for(let i=0; i<settingPuRocket; i++) {
-                let pos = getRandomEmptyPos();
-                powerUps.push({x: pos.x, y: pos.y, type: 'rocket'});
             }
         }
 
@@ -1685,30 +1461,6 @@
 
             postMatchLayer.classList.remove('winner-pulse');
 
-            // Apply custom settings only for local play; networked games get cols/rows from server state
-            if (!room) {
-                let customSize = parseInt(document.getElementById('grid-size-input').value, 10);
-                if (isNaN(customSize) || customSize < 5) customSize = 5;
-                if (customSize > 100) customSize = 100;
-                cols = customSize;
-                rows = customSize;
-                goal = { x: Math.floor(cols / 2), y: Math.floor(rows / 2) };
-            }
-
-            let customPuOpp = parseInt(document.getElementById('pu-opp-input').value, 10);
-            if (isNaN(customPuOpp) || customPuOpp < 0) customPuOpp = 10;
-            settingPuOpp = customPuOpp;
-
-            let customPuSelf = parseInt(document.getElementById('pu-self-input').value, 10);
-            if (isNaN(customPuSelf) || customPuSelf < 0) customPuSelf = 10;
-            settingPuSelf = customPuSelf;
-
-            let customPuRocket = parseInt(document.getElementById('pu-rocket-input').value, 10);
-            if (isNaN(customPuRocket) || customPuRocket < 0) customPuRocket = 0;
-            settingPuRocket = customPuRocket;
-
-            settingCollisions = document.getElementById('collisions-toggle').checked;
-
             parseLobby();
             if (activePlayersData.length === 0) return; // Need at least 1 player
 
@@ -1725,13 +1477,8 @@
             
             updateScoreboard();
 
-            // If we're starting a networked game, ensure a clean slate.
-            // All players will be added via onStateChange using server-authoritative sessionIds.
-            if (room && room.sessionId) {
-                console.log("Networked match starting. Clearing all local bug artifacts.");
-                bugs = []; 
-                activePlayersData.forEach(p => p.isLocal = false);
-            }
+            // Clear any leftover bugs; players are created fresh via onStateChange.
+            bugs = [];
 
             initRound();
         }
@@ -1743,17 +1490,9 @@
             // For networked play this placeholder is overwritten by the first onStateChange.
             generateMaze();
 
-            // In networked play, preserve existing bugs to maintain session continuity
-            if (typeof room === 'undefined' || !room) {
-                bugs = [];
-                spawnPowerUps();
-                bugs = activePlayersData.map(data => new Bug(data));
-            } else {
-                // Networked game: just clear particles and non-player visual effects
-                shockwaves = [];
-                particles = [];
-                rockets = [];
-            }
+            shockwaves = [];
+            particles = [];
+            rockets = [];
             
             powerUps = []; // Will be repopulated by server state
             screenShake = 0;
@@ -1787,68 +1526,6 @@
             shockwaves = [];
             rockets = [];
             draw(true);
-        }
-
-        function endGame(winner) {
-            const currentRoundTime = performance.now() - roundStartTime;
-            matchTime += currentRoundTime;
-            
-            // Log this round's statistics
-            roundTimes.push({
-                winnerId: winner.id,
-                winnerColor: winner.color,
-                time: currentRoundTime
-            });
-
-            scores[winner.id]++;
-            updateScoreboard();
-
-            // Huge explosion and shake on any win to make it spectacular!
-            screenShake = 40;
-            for (let i = 0; i < 200; i++) {
-                particles.push(new Particle(winner.pixelX, winner.pixelY, winner.color));
-                // Inject some bright white sparks into the mix
-                if (i % 4 === 0) particles.push(new Particle(winner.pixelX, winner.pixelY, '#ffffff'));
-            }
-
-            if (scores[winner.id] >= WINS_NEEDED) {
-                // Trigger full match over UI
-                Synth.win();
-                postMatchLayer.classList.remove('hidden');
-                Synth.muffle(true); 
-                gameState = 'MATCH_OVER';
-
-                // Add pulsing color effect to background based on winner
-                postMatchLayer.style.setProperty('--winner-color', winner.color);
-                postMatchLayer.classList.add('winner-pulse');
-                
-                const fastestRoundTime = Math.min(...roundTimes.map(rt => rt.time));
-
-                pmTitle.innerText = `${winner.id} Wins the Match!`;
-                
-                if (winner.isPlayer) {
-                    if (bestTime === null || matchTime < bestTime) { bestTime = matchTime; localStorage.setItem('neonBugBestTime', bestTime); }
-                    if (worstTime === null || matchTime > worstTime) { worstTime = matchTime; localStorage.setItem('neonBugWorstTime', worstTime); }
-                    pmSubtitle.innerHTML = `You won the Best-of-3!<br>Match Time: ${formatTime(matchTime)}<br>Fastest Round: ${formatTime(fastestRoundTime)}<br>Best Match Ever: ${formatTime(bestTime)} | Worst: ${formatTime(worstTime)}`;
-                } else {
-                    pmSubtitle.innerHTML = `${winner.id} won the Best-of-3!<br>Match Time: ${formatTime(matchTime)}<br>Fastest Round: ${formatTime(fastestRoundTime)}`;
-                }
-                pmTitle.style.textShadow = `0 0 20px ${winner.color}, 0 0 40px ${winner.color}`;
-
-                playAgainBtn.innerText = `Play Again with Friend Code ${room ? room.roomId : myCode}`;
-
-                // Populate the scrollable rounds list
-                const roundTimesList = document.getElementById('pm-round-times');
-                roundTimesList.innerHTML = roundTimes.map((rt, index) => {
-                    return `<div>Round ${index + 1}: <span style="color: ${rt.winnerColor}; font-weight: bold;">${rt.winnerId}</span> - ${formatTime(rt.time)}</div>`;
-                }).join('');
-
-            } else {
-                // Round Over (but match continues) - trigger countdown celebration
-                gameState = 'ROUND_OVER_COUNTDOWN';
-                currentWinner = winner;
-                roundCountdown = 3000; // 3 seconds
-            }
         }
 
         // --- DRAW LOOP ---
@@ -2132,10 +1809,7 @@
                 
                 // Authoritative local check for input processing
                 const isActuallyLocal = (room && room.sessionId) ? (bug.sessionId === room.sessionId) : bug.isLocal;
-                if (!isActuallyLocal) {
-                    // console.log(`[Input] Ignoring input for ${bug.id} (${bug.sessionId}). Local is: ${room?.sessionId}`);
-                    return;
-                }
+                if (!isActuallyLocal) return;
 
                 const map = controlsMap[bug.controlScheme];
                 if (!map) return;
@@ -2165,10 +1839,7 @@
 
                 // Authoritative local check for input processing
                 const isActuallyLocal = (room && room.sessionId) ? (bug.sessionId === room.sessionId) : bug.isLocal;
-                if (!isActuallyLocal) {
-                    // console.log(`[Input] Ignoring input for ${bug.id} (${bug.sessionId}). Local is: ${room?.sessionId}`);
-                    return;
-                }
+                if (!isActuallyLocal) return;
 
                 const map = controlsMap[bug.controlScheme];
                 if (!map) return;
@@ -2223,10 +1894,6 @@
 
         // --- MENU BUTTON BINDINGS ---
         
-        // Generate once on load and inject everywhere
-        const myCode = generateFriendCode();
-        document.querySelectorAll('.display-friend-code').forEach(el => el.innerText = myCode);
-
         // Auto-clean and capitalize Friend Code input
         joinCodeInput.addEventListener('input', (e) => {
             const start = e.target.selectionStart;
@@ -2240,10 +1907,10 @@
             returnToMenu();
         });
 
-        // In-game Restart Button
+        // In-game Restart Button — only valid for local play; networked rounds are server-controlled
         inGameRestartBtn.addEventListener('click', () => {
-            if (document.activeElement) document.activeElement.blur(); // Drop focus
-            initRound(); 
+            if (document.activeElement) document.activeElement.blur();
+            if (!room) initRound();
         });
 
         // In-game Mute Button
@@ -2423,7 +2090,7 @@
                         pmSubtitle.innerHTML = `${winnerId} won the Best-of-3!<br>Match Time: ${formatTime(matchTime)}<br>Fastest Round: ${formatTime(fastestRoundTime)}`;
                     }
 
-                    playAgainBtn.innerText = `Play Again with Friend Code ${room ? room.roomId : myCode}`;
+                    playAgainBtn.innerText = `Play Again with Friend Code ${room.roomId}`;
 
                     const roundTimesList = document.getElementById('pm-round-times');
                     roundTimesList.innerHTML = roundTimes.map((rt, index) =>
@@ -2458,7 +2125,6 @@
             Synth.startMusic();
             if (Synth.ctx.state === 'suspended') Synth.ctx.resume();
 
-            console.log("Searching for game...");
             bugs = [];
             try {
                 // Build settings from the lobby UI so Quick Start respects the player's configured slots
@@ -2488,10 +2154,7 @@
                 setupRoom(newRoom);
             } catch (e) {
                 console.error("Could not join/create room", e);
-                // Fallback to local if join fails
-                initMatch();
-                if (animationId) cancelAnimationFrame(animationId);
-                draw(true);
+                alert("Could not connect to server. Is it running?");
             }
         });
 
@@ -2501,7 +2164,6 @@
             Synth.startMusic();
             if (Synth.ctx.state === 'suspended') Synth.ctx.resume();
 
-            console.log("Joining room with code:", joinCodeInput.value);
             bugs = [];
             try {
                 const newRoom = await client.joinById(joinCodeInput.value);
@@ -2524,8 +2186,6 @@
             Synth.startMusic();
             if (Synth.ctx.state === 'suspended') Synth.ctx.resume();
             
-            // For Custom Match, we ALWAYS create a NEW room to respect custom settings
-            console.log("Creating custom networked game...");
             bugs = [];
             try {
                 const settings = {
@@ -2550,9 +2210,7 @@
                 setupRoom(newRoom);
             } catch (e) {
                 console.error("Could not create custom room", e);
-                initMatch(); 
-                if (animationId) cancelAnimationFrame(animationId);
-                draw(true);
+                alert("Could not connect to server. Is it running?");
             }
         });
 
