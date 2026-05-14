@@ -1,6 +1,6 @@
 import { Room } from "colyseus";
 import { type Client } from "@colyseus/core";
-import { GameState, Player, Cell, PowerUp, Slot } from "./GameState";
+import { GameState, Player, Cell, PowerUp, Slot } from "./GameState.js";
 
 export class GameRoom extends Room<{ state: GameState }> {
     maxClients = 8;

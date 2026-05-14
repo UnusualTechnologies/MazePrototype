@@ -1,6 +1,6 @@
 import colyseus, { listen } from "@colyseus/tools";
 import cors from "cors";
-import { GameRoom } from "./GameRoom";
+import { GameRoom } from "./GameRoom.js";
 
 listen(colyseus({
     initializeGameServer: (gameServer) => {
