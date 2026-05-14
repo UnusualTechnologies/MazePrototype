@@ -2,7 +2,7 @@ import { Room } from "colyseus";
 import { type Client } from "@colyseus/core";
 import { GameState, Player, Cell, PowerUp, Slot } from "./GameState.ts";
 
-export class GameRoom extends Room<GameState> {
+export class GameRoom extends Room<{ state: GameState }> {
     maxClients = 8;
     cols = 20;
     rows = 20;
@@ -12,6 +12,7 @@ export class GameRoom extends Room<GameState> {
     // BFS distance map from goal — flat array indexed [x * rows + y]
     distanceMap: number[] = [];
     // Per-AI session state (not broadcast)
+    aiCooldowns = new Map<string, number>();
     explorerLastPos = new Map<string, { x: number; y: number }>();
     guesserData = new Map<string, { target: { x: number; y: number }; distMap: number[] }>();
     // Freeze simulation while waiting for round reset
@@ -107,11 +108,11 @@ export class GameRoom extends Room<GameState> {
             this.state.timer += dt / 1000;
             this.state.players.forEach((player, sessionId) => {
                 if (player.isAI) {
-                    if (!player['aiCooldown']) player['aiCooldown'] = 0;
-                    player['aiCooldown'] += dt;
+                    const cooldown = (this.aiCooldowns.get(sessionId) ?? 0) + dt;
+                    this.aiCooldowns.set(sessionId, cooldown);
                     const slotSpeed = this.state.slots[player.slotIndex]?.aiSpeed ?? 600;
-                    if (player['aiCooldown'] >= slotSpeed) {
-                        player['aiCooldown'] = 0;
+                    if (cooldown >= slotSpeed) {
+                        this.aiCooldowns.set(sessionId, 0);
                         this.moveAI(sessionId, player);
                     }
                 }
@@ -151,16 +152,16 @@ export class GameRoom extends Room<GameState> {
         slot.sessionId = client.sessionId;
 
         // Take over the existing AI player at this slot (preserving position and score)
-        let existingPlayer: Player | null = null;
-        let existingId: string | null = null;
-        this.state.players.forEach((p, id) => {
+        let existingPlayer: Player | undefined;
+        let existingId: string | undefined;
+        this.state.players.forEach((p: Player, id: string) => {
             if (p.slotIndex === assignedSlotIndex) {
                 existingPlayer = p;
                 existingId = id;
             }
         });
 
-        if (existingPlayer && existingId) {
+        if (existingPlayer !== undefined && existingId !== undefined) {
             this.state.players.delete(existingId);
             this.explorerLastPos.delete(existingId);
             this.guesserData.delete(existingId);
@@ -459,7 +460,7 @@ export class GameRoom extends Room<GameState> {
             const i = player.slotIndex;
             player.x = (i % 2 === 0) ? 0 : this.cols - 1;
             player.y = (i < 2 || i > 5) ? 0 : this.rows - 1;
-            player['aiCooldown'] = 0;
+            this.aiCooldowns.set(sessionId, 0);
             // Re-init guesser/explorer state for AI
             if (player.isAI) this.initAIState(sessionId, player);
         });
