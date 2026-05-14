@@ -20,4 +20,5 @@ gameServer.define("game", GameRoom);
 
 gameServer.listen(port).then(() => {
     console.log(`Listening on ws://localhost:${port}`);
+    if (typeof process.send === "function") process.send("ready");
 });
