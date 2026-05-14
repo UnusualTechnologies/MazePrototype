@@ -10,6 +10,18 @@ export class Player extends Schema {
     @type("number") y: number = 0;
     @type("number") score: number = 0;
     @type("string") color: string = "#ffffff";
+    @type("boolean") isAI: boolean = false;
+    @type("number") slotIndex: number = -1;
+}
+
+export class Slot extends Schema {
+    @type("string") mode: string = "inactive"; // "inactive", "local", "ai_online", "ai_only"
+    @type("string") sessionId: string = "";
+    @type("string") id: string = "";
+    @type("string") color: string = "#ffffff";
+    @type("number") aiSpeed: number = 600;     // ms between AI moves
+    @type("string") aiBehavior: string = "random"; // "focused", "random", "guesser", "explorer"
+    @type("string") controlScheme: string = "WASD"; // for local slots
 }
 
 export class PowerUp extends Schema {
@@ -20,6 +32,7 @@ export class PowerUp extends Schema {
 
 export class GameState extends Schema {
     @type({ map: Player }) players = new MapSchema<Player>();
+    @type([ Slot ]) slots = new ArraySchema<Slot>();
     @type("number") timer: number = 0;
     @type([ Cell ]) grid = new ArraySchema<Cell>();
     @type("number") cols: number = 20;

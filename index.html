@@ -451,7 +451,7 @@
 </head>
 <body>
 
-    <div id="version-number">v1.1.1</div>
+    <div id="version-number">v1.1.14</div>
 
     <div id="main-wrapper">
         <div id="hud" class="hidden">
@@ -462,7 +462,7 @@
             </div>
             <div id="timer">00:00.000</div>
             <div id="scoreboard"></div>
-            <div id="friend-code-hud">Code: <span class="display-friend-code" style="color: #00ffff; font-weight: bold;"></span></div>
+            <div id="friend-code-hud">Friend code: <span class="display-friend-code" style="color: #00ffff; font-weight: bold;"></span></div>
         </div>
 
         <div id="game-container">
@@ -493,7 +493,7 @@
                 <button class="action-btn" id="quick-start-btn">Quick Start</button>
                 
                 <div class="join-group">
-                    <input type="text" id="join-code-input" placeholder="Code..." maxlength="6">
+                    <input type="text" id="join-code-input" placeholder="Code..." maxlength="12" style="text-transform: uppercase;">
                     <button class="action-btn secondary-btn" id="join-friend-btn">Join Friend</button>
                 </div>
 
@@ -528,6 +528,10 @@
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <input type="checkbox" id="collisions-toggle" checked style="width: 20px; height: 20px; cursor: pointer;"> 
                         <label for="collisions-toggle" style="font-size: 1.2rem; cursor: pointer; user-select: none;">Enable Collisions</label>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <input type="checkbox" id="private-toggle" style="width: 20px; height: 20px; cursor: pointer;"> 
+                        <label for="private-toggle" style="font-size: 1.2rem; cursor: pointer; user-select: none;">Friend Code Only</label>
                     </div>
                 </div>
 
@@ -665,9 +669,10 @@
         let goal = { x: Math.floor(cols / 2), y: Math.floor(rows / 2) };
 
         function generateFriendCode() {
-            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            // Clean alphabet: removed I, L, 1, O, 0 to avoid ambiguity
+            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
             let code = '';
-            for (let i = 0; i < 6; i++) {
+            for (let i = 0; i < 9; i++) {
                 code += chars.charAt(Math.floor(Math.random() * chars.length));
             }
             return code;
@@ -742,7 +747,6 @@
                         <option value="ai_online" ${defaultType === 'ai_online' ? 'selected' : ''}>AI / Online</option>
                         <option value="ai_only" ${defaultType === 'ai_only' ? 'selected' : ''}>AI Only</option>
                         <option value="inactive" ${defaultType === 'inactive' ? 'selected' : ''}>Inactive</option>
-                        <option value="friend_code">Friend Code Only</option>
                     </select>
                     <select class="control-select" style="display: ${defaultType === 'local' ? 'block' : 'none'}">
                         <option value="WASD" ${defaultControl === 'WASD' ? 'selected' : ''}>WASD Keys</option>
@@ -1182,7 +1186,6 @@
 
                 if (this.isPlayer && this.state === 'normal' && isActuallyLocal) {
                     if (now - this.lastMoveTime >= this.moveCooldown) {
-                        console.log(`[Update] ${this.id} (${this.sessionId}) moving locally. Room Local: ${room?.sessionId}`);
                         let moved = false;
                         
                         // 1. Check Input Intent Buffer (if player pressed turn slightly before intersection)
@@ -1682,13 +1685,15 @@
 
             postMatchLayer.classList.remove('winner-pulse');
 
-            // Apply custom settings
-            let customSize = parseInt(document.getElementById('grid-size-input').value, 10);
-            if (isNaN(customSize) || customSize < 5) customSize = 5;
-            if (customSize > 100) customSize = 100;
-            cols = customSize;
-            rows = customSize;
-            goal = { x: Math.floor(cols / 2), y: Math.floor(rows / 2) };
+            // Apply custom settings only for local play; networked games get cols/rows from server state
+            if (!room) {
+                let customSize = parseInt(document.getElementById('grid-size-input').value, 10);
+                if (isNaN(customSize) || customSize < 5) customSize = 5;
+                if (customSize > 100) customSize = 100;
+                cols = customSize;
+                rows = customSize;
+                goal = { x: Math.floor(cols / 2), y: Math.floor(rows / 2) };
+            }
 
             let customPuOpp = parseInt(document.getElementById('pu-opp-input').value, 10);
             if (isNaN(customPuOpp) || customPuOpp < 0) customPuOpp = 10;
@@ -1734,9 +1739,9 @@
         function initRound() {
             gameState = 'INITIALIZING'; // Temporarily change state to block draw() recursion
 
-            if (typeof room === 'undefined' || !room) {
-                generateMaze();
-            }
+            // Always build a local grid so drawMaze has a valid 2D array.
+            // For networked play this placeholder is overwritten by the first onStateChange.
+            generateMaze();
 
             // In networked play, preserve existing bugs to maintain session continuity
             if (typeof room === 'undefined' || !room) {
@@ -1830,7 +1835,7 @@
                 }
                 pmTitle.style.textShadow = `0 0 20px ${winner.color}, 0 0 40px ${winner.color}`;
 
-                playAgainBtn.innerText = `Play Again with Friend Code ${myCode}`;
+                playAgainBtn.innerText = `Play Again with Friend Code ${room ? room.roomId : myCode}`;
 
                 // Populate the scrollable rounds list
                 const roundTimesList = document.getElementById('pm-round-times');
@@ -2049,17 +2054,17 @@
             // In-game round over celebration overlay
             if (gameState === 'ROUND_OVER_COUNTDOWN') {
                 roundCountdown -= dt;
-                const secondsLeft = Math.max(1, Math.ceil(roundCountdown / 1000));
-                
+                const secondsLeft = Math.ceil(roundCountdown / 1000);
+
                 ctx.save();
-                
+
                 const titleSize = Math.max(20, width * 0.06);
                 const subSize = Math.max(14, width * 0.04);
-                
+
                 // Slight dark bar for readability
                 ctx.fillStyle = "rgba(5, 5, 16, 0.7)";
                 ctx.fillRect(0, height / 2 - titleSize * 1.5, width, titleSize * 3.8);
-                
+
                 ctx.font = `bold ${titleSize}px monospace`;
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
@@ -2067,22 +2072,28 @@
                 ctx.shadowColor = currentWinner.color;
                 ctx.fillStyle = currentWinner.color;
                 ctx.fillText(`${currentWinner.id} Wins Round!`, width / 2, height / 2 - titleSize * 0.2);
-                
+
                 ctx.fillStyle = "#fff";
                 ctx.font = `bold ${subSize}px monospace`;
                 ctx.shadowColor = "#000";
                 ctx.shadowBlur = 5;
-                ctx.fillText(`${secondsLeft} seconds to next round...`, width / 2, height / 2 + subSize * 1.5);
-                
-                ctx.fillStyle = "#aaa";
-                ctx.font = `normal ${subSize * 0.8}px monospace`;
-                ctx.shadowBlur = 2;
-                ctx.fillText(`(Press Space to skip)`, width / 2, height / 2 + subSize * 2.8);
-                
+                if (secondsLeft > 0) {
+                    ctx.fillText(`${secondsLeft} second${secondsLeft !== 1 ? 's' : ''} to next round...`, width / 2, height / 2 + subSize * 1.5);
+                } else {
+                    ctx.fillText(`Next round starting...`, width / 2, height / 2 + subSize * 1.5);
+                }
+
+                if (!room && secondsLeft > 0) {
+                    ctx.fillStyle = "#aaa";
+                    ctx.font = `normal ${subSize * 0.8}px monospace`;
+                    ctx.shadowBlur = 2;
+                    ctx.fillText(`(Press Space to skip)`, width / 2, height / 2 + subSize * 2.8);
+                }
+
                 ctx.restore();
 
                 if (roundCountdown <= 0) {
-                    initRound();
+                    if (!room) initRound(); // networked play uses round_reset message instead
                 }
             }
 
@@ -2109,8 +2120,8 @@
                 e.preventDefault();
             }
 
-            // Allow skipping the round countdown instantly with Spacebar
-            if (gameState === 'ROUND_OVER_COUNTDOWN' && (e.code === 'Space' || e.key === ' ')) {
+            // Allow skipping the round countdown instantly with Spacebar (local only — networked uses round_reset)
+            if (!room && gameState === 'ROUND_OVER_COUNTDOWN' && (e.code === 'Space' || e.key === ' ')) {
                 roundCountdown = 0;
                 return;
             }
@@ -2184,8 +2195,8 @@
         }, {passive: true});
 
         canvas.addEventListener('touchend', (e) => {
-            // Tap to skip countdown on mobile
-            if (gameState === 'ROUND_OVER_COUNTDOWN') {
+            // Tap to skip countdown on mobile (local only — networked uses round_reset)
+            if (!room && gameState === 'ROUND_OVER_COUNTDOWN') {
                 roundCountdown = 0;
                 return;
             }
@@ -2213,6 +2224,14 @@
         // Generate once on load and inject everywhere
         const myCode = generateFriendCode();
         document.querySelectorAll('.display-friend-code').forEach(el => el.innerText = myCode);
+
+        // Auto-clean and capitalize Friend Code input
+        joinCodeInput.addEventListener('input', (e) => {
+            const start = e.target.selectionStart;
+            const end = e.target.selectionEnd;
+            e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+            e.target.setSelectionRange(start, end);
+        });
 
         // In-game Menu Button
         inGameMenuBtn.addEventListener('click', () => {
@@ -2249,111 +2268,215 @@
         const client = new Colyseus.Client("ws://localhost:2567");
         let room;
 
+        async function setupRoom(newRoom) {
+            room = newRoom;
+            console.log("Joined room:", room.roomId, "SessionID:", room.sessionId);
+
+            // Update HUD to show the actual room code
+            document.querySelectorAll('.display-friend-code').forEach(el => el.innerText = room.roomId);
+
+            // Now that we have a room and a sessionId, we can safely init the match
+            initMatch();
+            if (animationId) cancelAnimationFrame(animationId);
+            draw(true);
+
+            // Listen for server state changes
+            room.onStateChange((state) => {
+                // Update timer from server
+                timerElement.innerText = formatTime(state.timer * 1000);
+                
+                // Update goal
+                goal.x = state.goalX;
+                goal.y = state.goalY;
+
+                // Sync Maze Grid
+                if (state.grid && state.grid.length > 0) {
+                    cols = state.cols;
+                    rows = state.rows;
+                    grid = [];
+                    for (let x = 0; x < cols; x++) {
+                        grid[x] = [];
+                        for (let y = 0; y < rows; y++) {
+                            const serverCell = state.grid[x * rows + y];
+                            const cell = new Cell(x, y);
+                            cell.walls = [
+                                serverCell.walls[0],
+                                serverCell.walls[1],
+                                serverCell.walls[2],
+                                serverCell.walls[3]
+                            ];
+                            grid[x][y] = cell;
+                        }
+                    }
+                    generateDistanceMap();
+                    cellSize = width / cols;
+                }
+
+                // Sync Power-ups
+                powerUps = [];
+                state.powerUps.forEach(pu => {
+                    powerUps.push({ x: pu.x, y: pu.y, type: pu.type });
+                });
+
+                // Sync Players
+                state.players.forEach((playerState, sessionId) => {
+                    let bug = bugs.find(b => b.sessionId === sessionId);
+                    const isLocal = sessionId === room.sessionId;
+                    if (!bug) {
+                        // Create new bug for joined player
+                        bug = new Bug({
+                            id: playerState.id,
+                            sessionId: sessionId,
+                            color: playerState.color,
+                            x: playerState.x,
+                            y: playerState.y,
+                            isPlayer: !playerState.isAI,
+                            isLocal: isLocal,
+                            // Online players each use WASD on their own machine.
+                            // Slot controlScheme only applies to split-screen local play.
+                            controlScheme: isLocal ? 'WASD' : (state.slots[playerState.slotIndex]?.controlScheme || 'WASD')
+                        });
+                        bugs.push(bug);
+                    } else {
+                        // Ensure isLocal and isPlayer status is always correct
+                        bug.isLocal = isLocal;
+                        bug.isPlayer = !playerState.isAI;
+
+                        // Freeze position updates during round-over countdown — server is frozen too,
+                        // so any position change here would be the reset teleport arriving early.
+                        if (gameState === 'ROUND_OVER_COUNTDOWN') return;
+
+                        // If player position changed drastically, trigger teleport animation
+                        if (Math.abs(bug.gridX - playerState.x) > 1 || Math.abs(bug.gridY - playerState.y) > 1) {
+                            if (bug.state === 'normal') {
+                                // Trigger local teleport effect for visual consistency
+                                bug.state = 'teleport_out';
+                                bug.stateTimer = 1.0;
+                                bug.targetGridX = playerState.x;
+                                bug.targetGridY = playerState.y;
+
+                                if (bug.isLocal) Synth.zip();
+                                else Synth.glitch();
+                            }
+                        } else {
+                            // Normal movement sync
+                            bug.gridX = playerState.x;
+                            bug.gridY = playerState.y;
+                        }
+                    }
+                });
+
+                // Sync server scores into local scores map (keeps scoreboard accurate for all clients)
+                state.players.forEach((playerState, sessionId) => {
+                    scores[playerState.id] = playerState.score;
+                });
+                updateScoreboard();
+
+                // Remove players who left
+                bugs = bugs.filter(b => state.players.has(b.sessionId));
+            });
+
+            room.onMessage("round_won", ({ winnerId, winnerColor, winnerScore, isMatchWon }) => {
+                if (gameState === 'ROUND_OVER_COUNTDOWN' || gameState === 'MATCH_OVER') return;
+
+                // Sync the winner's score from the server (don't double-increment)
+                scores[winnerId] = winnerScore;
+                updateScoreboard();
+
+                const winnerBug = bugs.find(b => b.id === winnerId);
+
+                // Round time tracking
+                const currentRoundTime = performance.now() - roundStartTime;
+                matchTime += currentRoundTime;
+                roundTimes.push({ winnerId, winnerColor, time: currentRoundTime });
+
+                // Explosion particles at winner's position
+                screenShake = 40;
+                if (winnerBug) {
+                    for (let i = 0; i < 200; i++) {
+                        particles.push(new Particle(winnerBug.pixelX, winnerBug.pixelY, winnerColor));
+                        if (i % 4 === 0) particles.push(new Particle(winnerBug.pixelX, winnerBug.pixelY, '#ffffff'));
+                    }
+                }
+
+                if (isMatchWon) {
+                    Synth.win();
+                    Synth.muffle(true);
+                    gameState = 'MATCH_OVER';
+
+                    postMatchLayer.style.setProperty('--winner-color', winnerColor);
+                    postMatchLayer.classList.add('winner-pulse');
+                    postMatchLayer.classList.remove('hidden');
+
+                    const fastestRoundTime = Math.min(...roundTimes.map(rt => rt.time));
+                    pmTitle.innerText = `${winnerId} Wins the Match!`;
+                    pmTitle.style.textShadow = `0 0 20px ${winnerColor}, 0 0 40px ${winnerColor}`;
+
+                    const isLocalWinner = winnerBug?.isLocal;
+                    if (isLocalWinner) {
+                        if (bestTime === null || matchTime < bestTime) { bestTime = matchTime; localStorage.setItem('neonBugBestTime', bestTime); }
+                        if (worstTime === null || matchTime > worstTime) { worstTime = matchTime; localStorage.setItem('neonBugWorstTime', worstTime); }
+                        pmSubtitle.innerHTML = `You won the Best-of-3!<br>Match Time: ${formatTime(matchTime)}<br>Fastest Round: ${formatTime(fastestRoundTime)}<br>Best Match Ever: ${formatTime(bestTime)} | Worst: ${formatTime(worstTime)}`;
+                    } else {
+                        pmSubtitle.innerHTML = `${winnerId} won the Best-of-3!<br>Match Time: ${formatTime(matchTime)}<br>Fastest Round: ${formatTime(fastestRoundTime)}`;
+                    }
+
+                    playAgainBtn.innerText = `Play Again with Friend Code ${room ? room.roomId : myCode}`;
+
+                    const roundTimesList = document.getElementById('pm-round-times');
+                    roundTimesList.innerHTML = roundTimes.map((rt, index) =>
+                        `<div>Round ${index + 1}: <span style="color:${rt.winnerColor};font-weight:bold;">${rt.winnerId}</span> - ${formatTime(rt.time)}</div>`
+                    ).join('');
+                } else {
+                    gameState = 'ROUND_OVER_COUNTDOWN';
+                    currentWinner = winnerBug || { id: winnerId, color: winnerColor };
+                    roundCountdown = 3000;
+                }
+            });
+
+            room.onMessage("round_reset", () => {
+                // Snap all bugs out of any stuck teleport animation before reinitializing
+                bugs.forEach(bug => {
+                    bug.state = 'normal';
+                    bug.stateTimer = 0;
+                });
+                initRound();
+            });
+        }
+
         quickStartBtn.addEventListener('click', async () => {
             Synth.init();
             Synth.startMusic();
             if (Synth.ctx.state === 'suspended') Synth.ctx.resume();
 
             console.log("Searching for game...");
-            bugs = []; // Explicitly clear any local bugs before joining networked game
+            bugs = [];
             try {
-                room = await client.joinOrCreate("game");
+                // Build settings from the lobby UI so Quick Start respects the player's configured slots
+                const settings = {
+                    cols: parseInt(document.getElementById('grid-size-input').value, 10) || 20,
+                    puOpp: parseInt(document.getElementById('pu-opp-input').value, 10) || 10,
+                    puSelf: parseInt(document.getElementById('pu-self-input').value, 10) || 10,
+                    puRocket: parseInt(document.getElementById('pu-rocket-input').value, 10) || 0,
+                    slots: lobbySlots.map(s => ({
+                        mode: s.typeSelect.value,
+                        id: s.id,
+                        color: s.color,
+                        aiSpeed: s.aiSpeedSelect.value,
+                        aiCustomSpeed: parseInt(s.customSpeedSlider.value, 10),
+                        aiBehavior: s.aiBehaviorSelect.value,
+                        controlScheme: s.controlSelect.value
+                    }))
+                };
+
+                const newRoom = await client.joinOrCreate("game", settings);
                 
                 // Wait a tiny bit to ensure sessionId is ready
-                if (!room.sessionId) {
+                if (!newRoom.sessionId) {
                     await new Promise(resolve => setTimeout(resolve, 50));
                 }
 
-                console.log("Joined room:", room.roomId, "SessionID:", room.sessionId);
-
-                // Now that we have a room and a sessionId, we can safely init the match
-                initMatch();
-                if (animationId) cancelAnimationFrame(animationId);
-                draw(true);
-
-                // Listen for server state changes
-                room.onStateChange((state) => {
-                    // Update timer from server
-                    timerElement.innerText = formatTime(state.timer * 1000);
-                    
-                    // Update goal
-                    goal.x = state.goalX;
-                    goal.y = state.goalY;
-
-                    // Sync Maze Grid
-                    if (state.grid && state.grid.length > 0) {
-                        cols = state.cols;
-                        rows = state.rows;
-                        grid = [];
-                        for (let x = 0; x < cols; x++) {
-                            grid[x] = [];
-                            for (let y = 0; y < rows; y++) {
-                                const serverCell = state.grid[x * rows + y];
-                                const cell = new Cell(x, y);
-                                cell.walls = [
-                                    serverCell.walls[0],
-                                    serverCell.walls[1],
-                                    serverCell.walls[2],
-                                    serverCell.walls[3]
-                                ];
-                                grid[x][y] = cell;
-                            }
-                        }
-                        generateDistanceMap();
-                        cellSize = width / cols;
-                    }
-
-                    // Sync Power-ups
-                    powerUps = [];
-                    state.powerUps.forEach(pu => {
-                        powerUps.push({ x: pu.x, y: pu.y, type: pu.type });
-                    });
-
-                    // Sync Players
-                    state.players.forEach((playerState, sessionId) => {
-                        let bug = bugs.find(b => b.sessionId === sessionId);
-                        const isLocal = sessionId === room.sessionId;
-                        if (!bug) {
-                            // Create new bug for joined player
-                            bug = new Bug({
-                                id: playerState.id,
-                                sessionId: sessionId,
-                                color: playerState.color,
-                                x: playerState.x,
-                                y: playerState.y,
-                                isPlayer: true,
-                                isLocal: isLocal,
-                                controlScheme: 'WASD' // Default
-                            });
-                            bugs.push(bug);
-                        } else {
-                            // Ensure isLocal status is always correct
-                            bug.isLocal = isLocal;
-
-                            // If player position changed drastically, trigger teleport animation
-                            if (Math.abs(bug.gridX - playerState.x) > 1 || Math.abs(bug.gridY - playerState.y) > 1) {
-                                if (bug.state === 'normal') {
-                                    // Trigger local teleport effect for visual consistency
-                                    bug.state = 'teleport_out';
-                                    bug.stateTimer = 1.0;
-                                    bug.targetGridX = playerState.x;
-                                    bug.targetGridY = playerState.y;
-                                    
-                                    if (bug.isLocal) Synth.zip();
-                                    else Synth.glitch();
-                                }
-                            } else {
-                                // Normal movement sync
-                                bug.gridX = playerState.x;
-                                bug.gridY = playerState.y;
-                            }
-                        }
-                    });
-
-                    // Remove players who left. 
-                    // In networked games, we ONLY keep bugs that have an active server sessionId match.
-                    bugs = bugs.filter(b => state.players.has(b.sessionId));
-                });
+                setupRoom(newRoom);
             } catch (e) {
                 console.error("Could not join/create room", e);
                 // Fallback to local if join fails
@@ -2362,23 +2485,66 @@
                 draw(true);
             }
         });
-        joinFriendBtn.addEventListener('click', () => {
-            if (joinCodeInput.value.length < 3) return; // Simple check
+
+        joinFriendBtn.addEventListener('click', async () => {
+            if (joinCodeInput.value.length < 3) return;
             Synth.init(); 
             Synth.startMusic();
             if (Synth.ctx.state === 'suspended') Synth.ctx.resume();
-            initMatch(); // Prototype fallback to quick match
-            if (animationId) cancelAnimationFrame(animationId);
-            draw(true);
+
+            console.log("Joining room with code:", joinCodeInput.value);
+            bugs = [];
+            try {
+                const newRoom = await client.joinById(joinCodeInput.value);
+                setupRoom(newRoom);
+            } catch (e) {
+                console.error("Could not join room", e);
+                if (e.message.toLowerCase().includes("not found")) {
+                    alert("Room not found. Please check the code and ensure it matches exactly (Case Sensitive).");
+                } else if (e.message === "ROOM_FULL") {
+                    alert("This room is currently full.");
+                } else {
+                    alert("An error occurred while joining the room: " + e.message);
+                }
+                // Stop initialization on failure
+            }
         });
 
-        startBtn.addEventListener('click', () => {
+        startBtn.addEventListener('click', async () => {
             Synth.init(); 
             Synth.startMusic();
             if (Synth.ctx.state === 'suspended') Synth.ctx.resume();
-            initMatch(); 
-            if (animationId) cancelAnimationFrame(animationId);
-            draw(true);
+            
+            // For Custom Match, we ALWAYS create a NEW room to respect custom settings
+            console.log("Creating custom networked game...");
+            bugs = [];
+            try {
+                const settings = {
+                    cols: parseInt(document.getElementById('grid-size-input').value, 10),
+                    puOpp: parseInt(document.getElementById('pu-opp-input').value, 10),
+                    puSelf: parseInt(document.getElementById('pu-self-input').value, 10),
+                    puRocket: parseInt(document.getElementById('pu-rocket-input').value, 10),
+                    slots: lobbySlots.map(s => ({
+                        mode: s.typeSelect.value,
+                        id: s.id,
+                        color: s.color,
+                        aiSpeed: s.aiSpeedSelect.value,
+                        aiCustomSpeed: parseInt(s.customSpeedSlider.value, 10),
+                        aiBehavior: s.aiBehaviorSelect.value,
+                        controlScheme: s.controlSelect.value
+                    })),
+                    collisions: document.getElementById('collisions-toggle').checked,
+                    isPrivate: document.getElementById('private-toggle').checked
+                };
+
+                const newRoom = await client.create("game", settings);
+                setupRoom(newRoom);
+            } catch (e) {
+                console.error("Could not create custom room", e);
+                initMatch(); 
+                if (animationId) cancelAnimationFrame(animationId);
+                draw(true);
+            }
         });
 
         // Play Again button at the match end
@@ -2399,6 +2565,9 @@
             generateMaze();
             resizeCanvas();
         };
+    </script>
+</body>
+</html>
     </script>
 </body>
 </html>
