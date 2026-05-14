@@ -180,7 +180,7 @@ export class GameRoom extends Room<GameState> {
         console.log(`Client ${client.sessionId} assigned to slot ${assignedSlotIndex}`);
     }
 
-    onLeave(client: Client, consented: boolean) {
+    onLeave(client: Client, _code?: number) {
         const player = this.state.players.get(client.sessionId);
         if (player) {
             const slotIndex = player.slotIndex;
