@@ -451,7 +451,7 @@
 </head>
 <body>
 
-    <div id="version-number">v1.1.14</div>
+    <div id="version-number">v1.1.15</div>
 
     <div id="main-wrapper">
         <div id="hud" class="hidden">
@@ -2157,10 +2157,12 @@
         });
 
         window.addEventListener('keyup', (e) => {
-            if (gameState !== 'PLAYING') return;
+            // No gameState gate — releases must always clean up heldDirections.
+            // Gating here would leave ghost held directions if the key is released
+            // during ROUND_OVER_COUNTDOWN, causing the bug to auto-move next round.
             bugs.forEach(bug => {
                 if (!bug.isPlayer) return;
-                
+
                 // Authoritative local check for input processing
                 const isActuallyLocal = (room && room.sessionId) ? (bug.sessionId === room.sessionId) : bug.isLocal;
                 if (!isActuallyLocal) {
@@ -2435,10 +2437,17 @@
             });
 
             room.onMessage("round_reset", () => {
-                // Snap all bugs out of any stuck teleport animation before reinitializing
                 bugs.forEach(bug => {
+                    // Clear teleport animations
                     bug.state = 'normal';
                     bug.stateTimer = 0;
+                    // Clear all input state so no ghost directions carry into the new round
+                    bug.heldDirections = [];
+                    bug.turnIntent = null;
+                    bug.swipeIntent = null;
+                    bug.bonkTimer = 0;
+                    bug.bonkDx = 0;
+                    bug.bonkDy = 0;
                 });
                 initRound();
             });
