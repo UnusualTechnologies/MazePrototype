@@ -388,8 +388,13 @@ export class GameRoom extends Room<{ state: GameState }> {
             if (isNaN(count) || count <= 0) return;
             for (let i = 0; i < count; i++) {
                 const pu = new PowerUp();
-                pu.x = Math.floor(Math.random() * this.cols);
-                pu.y = Math.floor(Math.random() * this.rows);
+                let x: number, y: number;
+                do {
+                    x = Math.floor(Math.random() * this.cols);
+                    y = Math.floor(Math.random() * this.rows);
+                } while (this.isReservedCell(x, y));
+                pu.x = x;
+                pu.y = y;
                 pu.type = type;
                 this.state.powerUps.push(pu);
             }
@@ -470,12 +475,21 @@ export class GameRoom extends Room<{ state: GameState }> {
         this.state.timer = 0;
     }
 
+    isReservedCell(x: number, y: number): boolean {
+        if (x === this.state.goalX && y === this.state.goalY) return true;
+        if ((x === 0 || x === this.cols - 1) && (y === 0 || y === this.rows - 1)) return true;
+        return false;
+    }
+
     teleportPlayer(player: Player) {
         let x: number, y: number;
         do {
             x = Math.floor(Math.random() * this.cols);
             y = Math.floor(Math.random() * this.rows);
-        } while (x === this.state.goalX && y === this.state.goalY);
+        } while (
+            this.isReservedCell(x, y) ||
+            this.state.powerUps.some((pu: PowerUp) => pu.x === x && pu.y === y)
+        );
         player.x = x;
         player.y = y;
     }
