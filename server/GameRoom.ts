@@ -80,10 +80,9 @@ export class GameRoom extends Room<{ state: GameState }> {
                 player.color = slot.color;
                 player.isAI = true;
                 player.slotIndex = i;
-                const startX = (i % 2 === 0) ? 0 : state.cols - 1;
-                const startY = (i < 2 || i > 5) ? 0 : state.rows - 1;
-                player.x = startX;
-                player.y = startY;
+                const spawn = this.getSpawnPosition(i);
+                player.x = spawn.x;
+                player.y = spawn.y;
                 state.players.set(`ai_${i}`, player);
             }
         }
@@ -174,8 +173,9 @@ export class GameRoom extends Room<{ state: GameState }> {
             player.color = slot.color;
             player.isAI = false;
             player.slotIndex = assignedSlotIndex;
-            player.x = (assignedSlotIndex % 2 === 0) ? 0 : this.cols - 1;
-            player.y = (assignedSlotIndex < 2 || assignedSlotIndex > 5) ? 0 : this.rows - 1;
+            const spawn = this.getSpawnPosition(assignedSlotIndex);
+            player.x = spawn.x;
+            player.y = spawn.y;
             this.state.players.set(client.sessionId, player);
         }
         console.log(`Client ${client.sessionId} assigned to slot ${assignedSlotIndex}`);
@@ -463,8 +463,9 @@ export class GameRoom extends Room<{ state: GameState }> {
         // Reset all player positions to starting corners
         this.state.players.forEach((player, sessionId) => {
             const i = player.slotIndex;
-            player.x = (i % 2 === 0) ? 0 : this.cols - 1;
-            player.y = (i < 2 || i > 5) ? 0 : this.rows - 1;
+            const spawn = this.getSpawnPosition(i);
+            player.x = spawn.x;
+            player.y = spawn.y;
             this.aiCooldowns.set(sessionId, 0);
             // Re-init guesser/explorer state for AI
             if (player.isAI) this.initAIState(sessionId, player);
@@ -475,9 +476,19 @@ export class GameRoom extends Room<{ state: GameState }> {
         this.state.timer = 0;
     }
 
+    getSpawnPosition(slotIndex: number): { x: number; y: number } {
+        return {
+            x: (slotIndex % 2 === 0) ? 0 : this.cols - 1,
+            y: (slotIndex < 2 || slotIndex > 5) ? 0 : this.rows - 1,
+        };
+    }
+
     isReservedCell(x: number, y: number): boolean {
         if (x === this.state.goalX && y === this.state.goalY) return true;
-        if ((x === 0 || x === this.cols - 1) && (y === 0 || y === this.rows - 1)) return true;
+        for (let i = 0; i < 8; i++) {
+            const s = this.getSpawnPosition(i);
+            if (x === s.x && y === s.y) return true;
+        }
         return false;
     }
 
